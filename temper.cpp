@@ -1,5 +1,7 @@
 // Thanks to Relavak Labs
 //  <http://relavak.wordpress.com/2009/10/17/temper-temperature-sensor-linux-driver/>
+// and OpenBSD's uthumb driver
+//  <http://www.openbsd.org/cgi-bin/cvsweb/src/sys/dev/usb/uthum.c>
 
 #include <algorithm>
 #include <cstdlib>
@@ -49,12 +51,12 @@ struct usb_error: std::exception {
     }
 };
 
-struct claim_interface {
+struct usb_claim_interface {
     bool try_attach;
     shared_ptr<libusb_device_handle> h;
     int interface;
 
-    claim_interface (shared_ptr<libusb_device_handle> h, int interface):
+    usb_claim_interface (shared_ptr<libusb_device_handle> h, int interface):
 	try_attach (false),
 	h (h),
 	interface (interface)
@@ -71,7 +73,7 @@ struct claim_interface {
 	usb_error::check (libusb_claim_interface (h.get (), interface));
     }
 
-    ~claim_interface () try {
+    ~usb_claim_interface () try {
 	usb_error::check (libusb_release_interface (h.get (), interface));
 
 	if (try_attach)
@@ -81,35 +83,32 @@ struct claim_interface {
     }
 };
 
-typedef std::tr1::array<unsigned int, 8> msg;
+typedef std::tr1::array<unsigned char, 32> msg32;
+typedef std::tr1::array<unsigned char, 256> msg256;
 
-void send_data (shared_ptr<libusb_device_handle> dh, msg data) {
-    std::tr1::array<unsigned char, 32> buf;
-    std::copy (data.begin (), data.end (), buf.begin ());
-    std::fill (buf.begin () + data.size (), buf.end (), 0);
-
+void usb_send (shared_ptr<libusb_device_handle> dh, msg32 data) {
     int r = libusb_control_transfer (dh.get (),
 	0x21, 0x09,
 	0x0200, 0x0001,
-	&buf[0], buf.size (),
+	&data[0], data.size (),
 	1000);
     usb_error::check (r);
-    if (r != 32) {
+    if (r != int (data.size ())) {
 	std::ostringstream ss;
 	ss << "wrong number of bytes written: " << r;
 	throw std::runtime_error (ss.str ());
     }
 }
 
-std::tr1::array<unsigned char, 256> recv_data (shared_ptr<libusb_device_handle> dh) {
-    std::tr1::array<unsigned char, 256> result;
+msg256 usb_recv (shared_ptr<libusb_device_handle> dh) {
+    msg256 result;
     int r = libusb_control_transfer (dh.get (),
 	0xa1, 0x01,
 	0x0300, 0x0001,
 	&result[0], result.size (),
 	1000);
     usb_error::check (r);
-    if (r < 2) {
+    if (r < int (result.size ())) {
 	std::ostringstream ss;
 	ss << "wrong number of bytes read: " << r;
 	throw std::runtime_error (ss.str ());
@@ -144,11 +143,56 @@ shared_ptr<libusb_device_handle> usb_device_get (shared_ptr<libusb_context> usb,
     throw std::runtime_error ("could not find device");
 }
 
-const msg select_device = {{10, 11, 12, 13, 0, 0, 2, 0}};
-const msg increase_precision = {{0x43, 0, 0, 0, 0, 0, 0, 0}};
-const msg padding = {{0, 0, 0, 0, 0, 0, 0, 0}};
-const msg get_temperature = {{0x54, 0, 0, 0, 0, 0, 0, 0}};
-const msg close_device = {{10, 11, 12, 13, 0, 0, 1, 0}};
+void send_cmd (shared_ptr<libusb_device_handle> dh, unsigned char cmd) {
+
+    // hey, here comes a command!
+    {
+	msg32 b = {{0x0a, 0x0b, 0x0c, 0x0d, 0x00, 0x00, 0x02, 0x00}};
+	usb_send (dh, b);
+    }
+
+    // issue the command
+    {
+	msg32 b = {{0}};
+	b[0] = cmd;
+	usb_send (dh, b);
+    }
+
+    // i2c bus padding
+    {
+	msg32 b = {{0}};
+	for (int i = 0; i < 7; ++i)
+	    usb_send (dh, b);
+    }
+}
+
+msg256 read_data (shared_ptr<libusb_device_handle> dh, unsigned char cmd) {
+    send_cmd (dh, cmd);
+
+    // hey, give me the data!
+    msg32 b = {{10, 11, 12, 13, 0, 0, 1, 0}};
+    usb_send (dh, b);
+
+    return usb_recv (dh);
+}
+
+enum cmds {
+    cmd_getdata_ntc   = 0x41,
+    cmd_reset0        = 0x43,
+    cmd_reset1        = 0x44,
+    cmd_getdata       = 0x48,
+    cmd_devtype       = 0x52,
+    cmd_getdata_outer = 0x53,
+    cmd_getdata_inner = 0x54
+};
+
+enum dev_types {
+    dev_type_temperhum  = 0x5a53,
+    dev_type_temperhum2 = 0x5a57,
+    dev_type_temper1    = 0x5857,
+    dev_type_temper2    = 0x5957,
+    dev_type_temperntc  = 0x5b57
+};
 
 int main () try {
     shared_ptr<libusb_context> usb = usb_open ();
@@ -156,29 +200,53 @@ int main () try {
     shared_ptr<libusb_device_handle> dh = usb_device_get (usb, 0x1130, 0x660c);
 
     usb_error::check (libusb_set_configuration (dh.get (), 1));
-    claim_interface i1 (dh, 0);
-    claim_interface i2 (dh, 1);
+    usb_claim_interface i1 (dh, 0);
+    usb_claim_interface i2 (dh, 1);
 
-    send_data (dh, select_device);
+    // init
+    {
+	struct dev_info {
+	    uint16_t dev_type;
+	    uint8_t cal[2][2];
+	    // OpenBSD repeatedly issues the devtype command until this != 0x53
+	    // Maybe this is necessary if the device has just been plugged in
+	    // and has not settled yet?
+	    uint8_t footer;
+	} dinfo;
+	msg256 dinfo_raw = read_data (dh, cmd_devtype);
+	std::copy (dinfo_raw.begin (), dinfo_raw.begin () + sizeof (dev_info), reinterpret_cast<unsigned char*> (&dinfo));
 
-    send_data (dh, increase_precision);
-    for (int i = 0; i < 7; i++) send_data (dh, padding);
+	//int val;
+	switch (dinfo.dev_type) {
+	case dev_type_temper1:
+	    send_cmd (dh, cmd_reset0);
+	    /*val = (dinfo.cal[0][0] - 0x14) * 100;
+	    val += dinfo.cal[0][1] * 10;
+	    std::cerr << "calibration: " << val << std::endl;*/
+	    break;
+	default:
+	    throw std::runtime_error ("unknwon device type");
+	}
+    }
 
-    send_data (dh, get_temperature);
-    for (int i = 0; i < 7; i++) send_data (dh, padding);
+    // read
+    {
+	msg256 d = read_data (dh, cmd_getdata_inner);
 
-    send_data (dh, close_device);
+	// raw values
+	/*
+	std::ostringstream h;
+	h << std::hex << "0x" << int (d[0]) << " 0x" << int (d[1]);
+	std::cout << h.str () << std::endl;
+	std::cout << ((d[0] << 8) + (d[1] & 0xff)) << std::endl;
+	*/
 
-    std::tr1::array<unsigned char, 256> d = recv_data (dh);
+	// from OpenBSD
+	//std::cout << d[0] * 100 + (d[1] >> 4) * 25 / 4 << std::endl;
 
-    /*std::ostringstream h;
-    h << std::hex << "0x" << int (d[0]) << " 0x" << int (d[1]);
-    std::cout << h.str () << std::endl;*/
-
-    //std::cout << ((d[0] << 8) + (d[1] & 0xff)) << std::endl;
-
-    //std::cout << int (d[0]) << '.' << int (d[1]/16) << std::endl;
-    std::cout << double (d[0]) + double (d[1])/256 << std::endl;
+	// easy way
+	std::cout << float (d[0]) + float (d[1])/256 << std::endl;
+    }
 
     return EXIT_SUCCESS;
 } catch (std::exception& e) {
