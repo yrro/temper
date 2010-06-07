@@ -45,39 +45,48 @@ struct usb_error: std::exception {
 	return ss.str ().c_str ();
     }
 
-    static void check (int e) {
+    static int check (int e) {
 	if (e < 0)
 	    throw usb_error (libusb_error (e));
+	return e;
+    }
+};
+
+struct usb_attach_interface {
+    shared_ptr<libusb_device_handle> h;
+    int interface;
+    bool was_attached;
+
+    usb_attach_interface (shared_ptr<libusb_device_handle> h, int interface):
+	h (h),
+	interface (interface),
+	was_attached (usb_error::check (libusb_kernel_driver_active (h.get (), interface)))
+    {
+	if (was_attached)
+	    usb_error::check (libusb_detach_kernel_driver (h.get (), interface));
+    }
+
+    ~usb_attach_interface () try {
+	if (was_attached)
+	    usb_error::check (libusb_attach_kernel_driver (h.get (), interface));
+    } catch (const usb_error& e) {
+	std::cerr << __FILE__ << ":" << __LINE__ << " (" << __func__ << "): " << e.what ();
     }
 };
 
 struct usb_claim_interface {
-    bool try_attach;
     shared_ptr<libusb_device_handle> h;
     int interface;
 
     usb_claim_interface (shared_ptr<libusb_device_handle> h, int interface):
-	try_attach (false),
 	h (h),
 	interface (interface)
     {
-	{
-	    int r = libusb_kernel_driver_active (h.get (), interface);
-	    usb_error::check (r);
-	    try_attach = r;
-	}
-
-	if (try_attach)
-	    usb_error::check (libusb_detach_kernel_driver (h.get (), interface));
-
 	usb_error::check (libusb_claim_interface (h.get (), interface));
     }
 
     ~usb_claim_interface () try {
 	usb_error::check (libusb_release_interface (h.get (), interface));
-
-	if (try_attach)
-	    usb_error::check (libusb_attach_kernel_driver (h.get (), interface));
     } catch (const usb_error& e) {
 	std::cerr << __FILE__ << ":" << __LINE__ << " (" << __func__ << "): " << e.what ();
     }
@@ -199,7 +208,11 @@ int main () try {
 
     shared_ptr<libusb_device_handle> dh = usb_device_get (usb, 0x1130, 0x660c);
 
+    usb_attach_interface a1 (dh, 0);
+    usb_attach_interface a2 (dh, 1);
+
     usb_error::check (libusb_set_configuration (dh.get (), 1));
+
     usb_claim_interface i1 (dh, 0);
     usb_claim_interface i2 (dh, 1);
 
