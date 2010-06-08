@@ -97,7 +97,7 @@ typedef std::tr1::array<unsigned char, 256> msg256;
 
 void usb_send (shared_ptr<libusb_device_handle> dh, msg32 data) {
     int r = libusb_control_transfer (dh.get (),
-	0x21, 0x09,
+	LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_CLASS | LIBUSB_RECIPIENT_INTERFACE, 0x09,
 	0x0200, 0x0001,
 	&data[0], data.size (),
 	1000);
@@ -112,7 +112,7 @@ void usb_send (shared_ptr<libusb_device_handle> dh, msg32 data) {
 msg256 usb_recv (shared_ptr<libusb_device_handle> dh) {
     msg256 result;
     int r = libusb_control_transfer (dh.get (),
-	0xa1, 0x01,
+	LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_CLASS | LIBUSB_RECIPIENT_INTERFACE, 0x01,
 	0x0300, 0x0001,
 	&result[0], result.size (),
 	1000);
