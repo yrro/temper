@@ -4,18 +4,15 @@
 //  <http://www.openbsd.org/cgi-bin/cvsweb/src/sys/dev/usb/uthum.c>
 
 #include <algorithm>
+#include <array>
 #include <cstdlib>
+#include <functional>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <sstream>
 
-#include <tr1/array>
-#include <tr1/functional>
-#include <tr1/memory>
-
 #include <libusb.h>
-
-using std::tr1::shared_ptr;
 
 struct usb_error: std::exception {
     libusb_error e;
@@ -53,11 +50,11 @@ struct usb_error: std::exception {
 };
 
 struct usb_attach_interface {
-    shared_ptr<libusb_device_handle> h;
+    std::shared_ptr<libusb_device_handle> h;
     int interface;
     bool was_attached;
 
-    usb_attach_interface (shared_ptr<libusb_device_handle> h, int interface):
+    usb_attach_interface (std::shared_ptr<libusb_device_handle> h, int interface):
 	h (h),
 	interface (interface),
 	was_attached (usb_error::check (libusb_kernel_driver_active (h.get (), interface)))
@@ -75,10 +72,10 @@ struct usb_attach_interface {
 };
 
 struct usb_claim_interface {
-    shared_ptr<libusb_device_handle> h;
+    std::shared_ptr<libusb_device_handle> h;
     int interface;
 
-    usb_claim_interface (shared_ptr<libusb_device_handle> h, int interface):
+    usb_claim_interface (std::shared_ptr<libusb_device_handle> h, int interface):
 	h (h),
 	interface (interface)
     {
@@ -92,15 +89,15 @@ struct usb_claim_interface {
     }
 };
 
-typedef std::tr1::array<unsigned char, 32> msg32;
-typedef std::tr1::array<unsigned char, 256> msg256;
+typedef std::array<unsigned char, 32> msg32;
+typedef std::array<unsigned char, 256> msg256;
 
 enum hid_req {
     get_report = 0x01,
     set_report = 0x09
 };
 
-void usb_send (shared_ptr<libusb_device_handle> dh, msg32 data) {
+void usb_send (std::shared_ptr<libusb_device_handle> dh, msg32 data) {
     int r = libusb_control_transfer (dh.get (),
 	LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_CLASS | LIBUSB_RECIPIENT_INTERFACE, set_report,
 	0x0200, 0x0001,
@@ -114,7 +111,7 @@ void usb_send (shared_ptr<libusb_device_handle> dh, msg32 data) {
     }
 }
 
-msg256 usb_recv (shared_ptr<libusb_device_handle> dh) {
+msg256 usb_recv (std::shared_ptr<libusb_device_handle> dh) {
     msg256 result;
     int r = libusb_control_transfer (dh.get (),
 	LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_CLASS | LIBUSB_RECIPIENT_INTERFACE, get_report,
@@ -130,34 +127,34 @@ msg256 usb_recv (shared_ptr<libusb_device_handle> dh) {
     return result;
 }
 
-shared_ptr<libusb_context> usb_open () {
+std::shared_ptr<libusb_context> usb_open () {
     libusb_context* p;
     usb_error::check (libusb_init (&p));
-    return shared_ptr<libusb_context> (p, libusb_exit);
+    return std::shared_ptr<libusb_context> (p, libusb_exit);
 }
 
-std::pair<shared_ptr<libusb_device*>, ssize_t> usb_device_list (shared_ptr<libusb_context> usb) {
+std::pair<std::shared_ptr<libusb_device*>, ssize_t> usb_device_list (std::shared_ptr<libusb_context> usb) {
     libusb_device** p;
     ssize_t n = libusb_get_device_list (usb.get (), &p);
-    return std::make_pair (shared_ptr<libusb_device*> (p, std::tr1::bind (libusb_free_device_list, std::tr1::placeholders::_1, 1)), n);
+    return std::make_pair (std::shared_ptr<libusb_device*> (p, std::bind (libusb_free_device_list, std::placeholders::_1, 1)), n);
 }
 
-shared_ptr<libusb_device_handle> usb_device_get (shared_ptr<libusb_context> usb, uint16_t vendor, uint16_t product) {
-    std::pair<shared_ptr<libusb_device*>, ssize_t> list = usb_device_list (usb);
+std::shared_ptr<libusb_device_handle> usb_device_get (std::shared_ptr<libusb_context> usb, uint16_t vendor, uint16_t product) {
+    std::pair<std::shared_ptr<libusb_device*>, ssize_t> list = usb_device_list (usb);
     for (libusb_device** dev = list.first.get (); dev != list.first.get () + list.second; ++dev) {
 	libusb_device_descriptor d;
 	usb_error::check (libusb_get_device_descriptor (*dev, &d));
 	if (d.idVendor == vendor && d.idProduct == product) {
 	    libusb_device_handle* p;
 	    usb_error::check (libusb_open (*dev, &p));
-	    return shared_ptr<libusb_device_handle> (p, libusb_close);
+	    return std::shared_ptr<libusb_device_handle> (p, libusb_close);
 	}
     }
 
     throw std::runtime_error ("could not find device");
 }
 
-void send_cmd (shared_ptr<libusb_device_handle> dh, unsigned char cmd) {
+void send_cmd (std::shared_ptr<libusb_device_handle> dh, unsigned char cmd) {
 
     // hey, here comes a command!
     {
@@ -180,7 +177,7 @@ void send_cmd (shared_ptr<libusb_device_handle> dh, unsigned char cmd) {
     }
 }
 
-msg256 read_data (shared_ptr<libusb_device_handle> dh, unsigned char cmd) {
+msg256 read_data (std::shared_ptr<libusb_device_handle> dh, unsigned char cmd) {
     send_cmd (dh, cmd);
 
     // hey, give me the data!
@@ -192,8 +189,8 @@ msg256 read_data (shared_ptr<libusb_device_handle> dh, unsigned char cmd) {
 
 enum cmds {
     cmd_getdata_ntc   = 0x41,
-    cmd_reset0        = 0x43,
-    cmd_reset1        = 0x44,
+    cmd_reset0	      = 0x43,
+    cmd_reset1	      = 0x44,
     cmd_getdata       = 0x48,
     cmd_devtype       = 0x52,
     cmd_getdata_outer = 0x53,
@@ -201,17 +198,17 @@ enum cmds {
 };
 
 enum dev_types {
-    dev_type_temperhum  = 0x5a53,
+    dev_type_temperhum	= 0x5a53,
     dev_type_temperhum2 = 0x5a57,
-    dev_type_temper1    = 0x5857,
-    dev_type_temper2    = 0x5957,
-    dev_type_temperntc  = 0x5b57
+    dev_type_temper1	= 0x5857,
+    dev_type_temper2	= 0x5957,
+    dev_type_temperntc	= 0x5b57
 };
 
 int main () try {
-    shared_ptr<libusb_context> usb = usb_open ();
+    std::shared_ptr<libusb_context> usb = usb_open ();
 
-    shared_ptr<libusb_device_handle> dh = usb_device_get (usb, 0x1130, 0x660c);
+    std::shared_ptr<libusb_device_handle> dh = usb_device_get (usb, 0x1130, 0x660c);
 
     usb_attach_interface a1 (dh, 0);
     usb_attach_interface a2 (dh, 1);
@@ -271,3 +268,5 @@ int main () try {
     std::cerr << "exception: " << e.what () << std::endl;
     return EXIT_FAILURE;
 }
+
+// vim: ts=8 sts=4 sw=4 et
