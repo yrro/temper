@@ -127,19 +127,13 @@ msg256 usb_recv (std::shared_ptr<libusb_device_handle> dh) {
     return result;
 }
 
-std::shared_ptr<libusb_context> usb_open () {
-    libusb_context* p;
-    usb_error::check (libusb_init (&p));
-    return std::shared_ptr<libusb_context> (p, libusb_exit);
-}
-
-std::pair<std::shared_ptr<libusb_device*>, ssize_t> usb_device_list (std::shared_ptr<libusb_context> usb) {
+std::pair<std::shared_ptr<libusb_device*>, ssize_t> usb_device_list (libusb_context* usb) {
     libusb_device** p;
-    ssize_t n = libusb_get_device_list (usb.get (), &p);
+    ssize_t n = libusb_get_device_list (usb, &p);
     return std::make_pair (std::shared_ptr<libusb_device*> (p, std::bind (libusb_free_device_list, std::placeholders::_1, 1)), n);
 }
 
-std::shared_ptr<libusb_device_handle> usb_device_get (std::shared_ptr<libusb_context> usb, uint16_t vendor, uint16_t product) {
+std::shared_ptr<libusb_device_handle> usb_device_get (libusb_context* usb, uint16_t vendor, uint16_t product) {
     std::pair<std::shared_ptr<libusb_device*>, ssize_t> list = usb_device_list (usb);
     for (libusb_device** dev = list.first.get (); dev != list.first.get () + list.second; ++dev) {
 	libusb_device_descriptor d;
@@ -206,9 +200,14 @@ enum dev_types {
 };
 
 int main () try {
-    std::shared_ptr<libusb_context> usb = usb_open ();
+    std::unique_ptr<libusb_context, decltype(&libusb_exit)> usb(nullptr, libusb_exit);
+    {
+        libusb_context* p;
+        usb_error::check (libusb_init (&p));
+        usb.reset(p);
+    }
 
-    std::shared_ptr<libusb_device_handle> dh = usb_device_get (usb, 0x1130, 0x660c);
+    std::shared_ptr<libusb_device_handle> dh = usb_device_get (usb.get(), 0x1130, 0x660c);
 
     usb_attach_interface a1 (dh, 0);
     usb_attach_interface a2 (dh, 1);
