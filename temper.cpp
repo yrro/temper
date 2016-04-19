@@ -264,7 +264,7 @@ int main () try {
 	//std::cout << d[0] * 100 + (d[1] >> 4) * 25 / 4 << std::endl;
 
 	// easy way
-	std::cout << float (d[0]) + float (d[1])/256 << std::endl;
+	std::cout << float (d[0]) + float (d[1])/256 << '\n';
     }
 
     return EXIT_SUCCESS;
