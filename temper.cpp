@@ -19,7 +19,7 @@ struct usb_error: std::exception {
 
     usb_error (libusb_error e): e (e) {}
 
-    const char* what () const throw () {
+    const char* what () const noexcept {
 	switch (e) {
 	case LIBUSB_SUCCESS: return "Success (no error)";
 	case LIBUSB_ERROR_IO: return "Input/output error";
