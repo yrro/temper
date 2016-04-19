@@ -233,7 +233,7 @@ int main () try {
 	    uint8_t footer;
 	} dinfo;
 	msg256 dinfo_raw = read_data (dh, cmd_devtype);
-	std::copy (dinfo_raw.begin (), dinfo_raw.begin () + sizeof (dev_info), reinterpret_cast<unsigned char*> (&dinfo));
+	std::copy (std::begin(dinfo_raw), std::end(dinfo_raw), reinterpret_cast<unsigned char*> (&dinfo));
 
 	//int val;
 	switch (dinfo.dev_type) {
