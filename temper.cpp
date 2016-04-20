@@ -30,6 +30,12 @@ struct usb_error: std::exception {
     }
 };
 
+std::unique_ptr<libusb_context, decltype(&libusb_exit)> usb_open() {
+    libusb_context* p;
+    usb_error::check(libusb_init(&p));
+    return std::unique_ptr<libusb_context, decltype(&libusb_exit)>(p, libusb_exit);
+}
+
 struct usb_attach_interface {
     std::shared_ptr<libusb_device_handle> h;
     int interface;
@@ -186,12 +192,7 @@ enum dev_types {
 };
 
 int main () try {
-    std::unique_ptr<libusb_context, decltype(&libusb_exit)> usb(nullptr, libusb_exit);
-    {
-        libusb_context* p;
-        usb_error::check (libusb_init (&p));
-        usb.reset(p);
-    }
+    auto usb = usb_open();
 
     std::shared_ptr<libusb_device_handle> dh = usb_device_get (usb.get(), 0x1130, 0x660c);
 
