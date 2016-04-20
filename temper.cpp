@@ -20,26 +20,7 @@ struct usb_error: std::exception {
     usb_error (libusb_error e): e (e) {}
 
     const char* what () const noexcept {
-	switch (e) {
-	case LIBUSB_SUCCESS: return "Success (no error)";
-	case LIBUSB_ERROR_IO: return "Input/output error";
-	case LIBUSB_ERROR_INVALID_PARAM: return "Invalid parameter";
-	case LIBUSB_ERROR_ACCESS: return "Access denied";
-	case LIBUSB_ERROR_NO_DEVICE: return "No such device";
-	case LIBUSB_ERROR_NOT_FOUND: return "Entity not found";
-	case LIBUSB_ERROR_BUSY: return "Resource busy";
-	case LIBUSB_ERROR_TIMEOUT: return "Operation timed out";
-	case LIBUSB_ERROR_PIPE: return "Pipe error";
-	case LIBUSB_ERROR_INTERRUPTED: return "System call interrupted";
-	case LIBUSB_ERROR_NO_MEM: return "Insufficient memory";
-	case LIBUSB_ERROR_NOT_SUPPORTED: return "Operation not supported";
-	case LIBUSB_ERROR_OTHER: return "Other error";
-	case LIBUSB_ERROR_OVERFLOW: return "Overflow";
-	}
-
-	std::ostringstream ss;
-	ss << e;
-	return ss.str ().c_str ();
+        return libusb_error_name(e);
     }
 
     static int check (int e) {
