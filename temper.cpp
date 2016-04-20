@@ -67,7 +67,7 @@ struct usb_attach_interface {
 	if (was_attached)
 	    usb_error::check (libusb_attach_kernel_driver (h.get (), interface));
     } catch (const usb_error& e) {
-	std::cerr << __FILE__ << ":" << __LINE__ << " (" << __func__ << "): " << e.what ();
+	std::cerr << __FILE__ << ":" << __LINE__ << " (" << __func__ << "): " << e.what () << '\n';
     }
 };
 
